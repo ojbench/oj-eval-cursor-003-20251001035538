@@ -300,20 +300,25 @@ public:
             // Only update scoreboard if team stats changed
             
             if (stats_changed) {
-                // Store who's at target rank before update
-                string replaced_team = "";
-                if (old_rank > 1 && old_rank <= team_order.size()) {
-                    replaced_team = team_order[old_rank - 2];  // Team at rank old_rank-1 (0-indexed)
-                }
+                // Build simple rank map before update
+                string old_leader = team_order[0];
                 
                 // Update scoreboard
                 update_scoreboard();
                 
                 // Check if ranking changed (moved up)
                 if (t.ranking < old_rank) {
-                    // If we don't have replaced team yet, get it from updated order
-                    if (replaced_team.empty() || teams[replaced_team].ranking != t.ranking + 1) {
-                        replaced_team = team_order[t.ranking]; // Team at position after current
+                    // Team moved up - find who they replaced
+                    // The replaced team is now at rank t.ranking + 1 (or old position)
+                    string replaced_team = "";
+                    for (const string& name : team_order) {
+                        if (name != lowest_team && teams[name].ranking == t.ranking + 1) {
+                            replaced_team = name;
+                            break;
+                        }
+                    }
+                    if (replaced_team.empty() && t.ranking < team_order.size()) {
+                        replaced_team = team_order[t.ranking];
                     }
                     cout << lowest_team << " " << replaced_team << " " 
                          << t.solved_count << " " << t.penalty_time << "\n";
