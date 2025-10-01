@@ -21,7 +21,9 @@ struct ProblemStatus {
     bool frozen = false;
     int frozen_count = 0;
     int wrong_before_freeze = 0;
-    vector<Submission> frozen_subs; // submissions during freeze
+    int first_ac_time_in_freeze = -1; // -1 means no AC during freeze
+    int wrongs_before_ac_in_freeze = 0;
+    int total_wrongs_in_freeze = 0;
 };
 
 struct Team {
@@ -187,13 +189,22 @@ public:
         } else {
             // Frozen
             if (!t.problems[prob].solved) {
-                if (!t.problems[prob].frozen) {
+                ProblemStatus& ps = t.problems[prob];
+                if (!ps.frozen) {
                     // First submission after freeze for unsolved problem
-                    t.problems[prob].frozen = true;
-                    t.problems[prob].wrong_before_freeze = t.problems[prob].wrong_count;
+                    ps.frozen = true;
+                    ps.wrong_before_freeze = ps.wrong_count;
                 }
-                t.problems[prob].frozen_count++;
-                t.problems[prob].frozen_subs.push_back(sub);
+                ps.frozen_count++;
+                
+                if (status == "Accepted" && ps.first_ac_time_in_freeze == -1) {
+                    // First AC during freeze
+                    ps.first_ac_time_in_freeze = time;
+                    ps.wrongs_before_ac_in_freeze = ps.total_wrongs_in_freeze;
+                } else if (status != "Accepted" && ps.first_ac_time_in_freeze == -1) {
+                    // Wrong submission before any AC
+                    ps.total_wrongs_in_freeze++;
+                }
             }
         }
     }
@@ -229,6 +240,7 @@ public:
         while (true) {
             // Find lowest ranked team with frozen problems
             string lowest_team = "";
+            int lowest_idx = -1;
             for (int i = team_order.size() - 1; i >= 0; i--) {
                 Team& t = teams[team_order[i]];
                 bool has_frozen = false;
@@ -240,6 +252,7 @@ public:
                 }
                 if (has_frozen) {
                     lowest_team = team_order[i];
+                    lowest_idx = i;
                     break;
                 }
             }
@@ -260,41 +273,38 @@ public:
             int old_rank = t.ranking;
             
             // Process frozen submissions for this problem
-            int wrong_during_freeze = 0;
-            for (const Submission& sub : ps.frozen_subs) {
-                if (sub.status == "Accepted" && !ps.solved) {
-                    ps.solved = true;
-                    ps.solve_time = sub.time;
-                    ps.wrong_before_solve = ps.wrong_before_freeze + wrong_during_freeze;
-                    t.solved_count++;
-                    t.penalty_time += 20 * (ps.wrong_before_freeze + wrong_during_freeze) + sub.time;
-                    t.solve_times.push_back(sub.time);
-                    break; // Only first AC counts
-                } else if (sub.status != "Accepted") {
-                    wrong_during_freeze++;
-                }
-            }
-            
-            // If not solved, update wrong count
-            if (!ps.solved) {
-                ps.wrong_count = ps.wrong_before_freeze + wrong_during_freeze;
+            if (ps.first_ac_time_in_freeze != -1) {
+                // There was an AC during freeze
+                ps.solved = true;
+                ps.solve_time = ps.first_ac_time_in_freeze;
+                ps.wrong_before_solve = ps.wrong_before_freeze + ps.wrongs_before_ac_in_freeze;
+                t.solved_count++;
+                t.penalty_time += 20 * (ps.wrong_before_freeze + ps.wrongs_before_ac_in_freeze) + ps.first_ac_time_in_freeze;
+                t.solve_times.push_back(ps.first_ac_time_in_freeze);
+            } else {
+                // No AC during freeze, just update wrong count
+                ps.wrong_count = ps.wrong_before_freeze + ps.total_wrongs_in_freeze;
             }
             
             ps.frozen = false;
             ps.frozen_count = 0;
-            ps.frozen_subs.clear();
+            ps.first_ac_time_in_freeze = -1;
+            ps.wrongs_before_ac_in_freeze = 0;
+            ps.total_wrongs_in_freeze = 0;
             
-            // Store old scoreboard state to find who was replaced
-            vector<string> old_order = team_order;
+            // Store who's at the target position before update (for replaced team detection)
+            map<int, string> rank_to_team;
+            for (const string& team_name : team_order) {
+                rank_to_team[teams[team_name].ranking] = team_name;
+            }
             
             // Update scoreboard
             update_scoreboard();
             
             // Check if ranking changed (moved up)
             if (t.ranking < old_rank) {
-                // Find who was at the position where this team moved to
-                // In old_order, find the team at position (new_rank - 1)
-                string replaced_team = old_order[t.ranking - 1];
+                // Find who was at the new rank position before
+                string replaced_team = rank_to_team[t.ranking];
                 cout << lowest_team << " " << replaced_team << " " 
                      << t.solved_count << " " << t.penalty_time << "\n";
             }
