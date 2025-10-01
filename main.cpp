@@ -33,7 +33,13 @@ struct Team {
     int solved_count = 0;
     int penalty_time = 0;
     int ranking = 0;
-    vector<int> solve_times; // for tie-breaking
+    vector<int> solve_times; // for tie-breaking (unsorted)
+    vector<int> sorted_solve_times; // sorted descending for comparison
+    
+    void update_sorted_times() {
+        sorted_solve_times = solve_times;
+        sort(sorted_solve_times.rbegin(), sorted_solve_times.rend());
+    }
 };
 
 class ICPCSystem {
@@ -51,7 +57,7 @@ private:
             team_order.push_back(p.first);
         }
         
-        sort(team_order.begin(), team_order.end(), [this](const string& a, const string& b) {
+        stable_sort(team_order.begin(), team_order.end(), [this](const string& a, const string& b) {
             Team& ta = teams[a];
             Team& tb = teams[b];
             
@@ -65,16 +71,11 @@ private:
                 return ta.penalty_time < tb.penalty_time;
             }
             
-            // Compare solve times
-            vector<int> times_a = ta.solve_times;
-            vector<int> times_b = tb.solve_times;
-            sort(times_a.rbegin(), times_a.rend());
-            sort(times_b.rbegin(), times_b.rend());
-            
-            int min_size = min(times_a.size(), times_b.size());
+            // Compare sorted solve times
+            int min_size = min(ta.sorted_solve_times.size(), tb.sorted_solve_times.size());
             for (int i = 0; i < min_size; i++) {
-                if (times_a[i] != times_b[i]) {
-                    return times_a[i] < times_b[i];
+                if (ta.sorted_solve_times[i] != tb.sorted_solve_times[i]) {
+                    return ta.sorted_solve_times[i] < tb.sorted_solve_times[i];
                 }
             }
             
@@ -183,6 +184,7 @@ public:
                 t.solved_count++;
                 t.penalty_time += 20 * t.problems[prob].wrong_count + time;
                 t.solve_times.push_back(time);
+                t.update_sorted_times();
             } else if (status != "Accepted") {
                 t.problems[prob].wrong_count++;
             }
@@ -273,6 +275,7 @@ public:
             int old_rank = t.ranking;
             
             // Process frozen submissions for this problem
+            bool stats_changed = false;
             if (ps.first_ac_time_in_freeze != -1) {
                 // There was an AC during freeze
                 ps.solved = true;
@@ -281,6 +284,8 @@ public:
                 t.solved_count++;
                 t.penalty_time += 20 * (ps.wrong_before_freeze + ps.wrongs_before_ac_in_freeze) + ps.first_ac_time_in_freeze;
                 t.solve_times.push_back(ps.first_ac_time_in_freeze);
+                t.update_sorted_times();
+                stats_changed = true;
             } else {
                 // No AC during freeze, just update wrong count
                 ps.wrong_count = ps.wrong_before_freeze + ps.total_wrongs_in_freeze;
@@ -292,21 +297,27 @@ public:
             ps.wrongs_before_ac_in_freeze = 0;
             ps.total_wrongs_in_freeze = 0;
             
-            // Store who's at the target position before update (for replaced team detection)
-            map<int, string> rank_to_team;
-            for (const string& team_name : team_order) {
-                rank_to_team[teams[team_name].ranking] = team_name;
-            }
+            // Only update scoreboard if team stats changed
             
-            // Update scoreboard
-            update_scoreboard();
-            
-            // Check if ranking changed (moved up)
-            if (t.ranking < old_rank) {
-                // Find who was at the new rank position before
-                string replaced_team = rank_to_team[t.ranking];
-                cout << lowest_team << " " << replaced_team << " " 
-                     << t.solved_count << " " << t.penalty_time << "\n";
+            if (stats_changed) {
+                // Store who's at target rank before update
+                string replaced_team = "";
+                if (old_rank > 1 && old_rank <= team_order.size()) {
+                    replaced_team = team_order[old_rank - 2];  // Team at rank old_rank-1 (0-indexed)
+                }
+                
+                // Update scoreboard
+                update_scoreboard();
+                
+                // Check if ranking changed (moved up)
+                if (t.ranking < old_rank) {
+                    // If we don't have replaced team yet, get it from updated order
+                    if (replaced_team.empty() || teams[replaced_team].ranking != t.ranking + 1) {
+                        replaced_team = team_order[t.ranking]; // Team at position after current
+                    }
+                    cout << lowest_team << " " << replaced_team << " " 
+                         << t.solved_count << " " << t.penalty_time << "\n";
+                }
             }
         }
         
